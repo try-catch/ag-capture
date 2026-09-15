@@ -99,15 +99,9 @@ function expectedStagingFilter(campaignId: string, workerIndex: number): Documen
     };
 }
 
-async function assertCleanTarget(collection: Collection): Promise<number> {
-    const [total, tagged] = await Promise.all([
-        collection.countDocuments({}),
-        collection.countDocuments(validRtpFilter),
-    ]);
-    if (total !== tagged) {
-        throw new Error(`target collection contains ${total - tagged} documents without an RTP tag`);
-    }
-    return tagged;
+async function countTargetBaseline(collection: Collection): Promise<number> {
+    // 正式库的旧 RTP 标签可能被外部业务客户端清空；补拉只核验新增份额，保留旧数据原状。
+    return collection.countDocuments({});
 }
 
 async function assertStaging(
@@ -145,7 +139,7 @@ function appendGitHubOutput(name: string, value: string): void {
 async function prepare(db: Db): Promise<void> {
     const target = positiveInteger(process.env.TARGET_TOTAL || DEFAULT_TARGET_TOTAL, 'TARGET_TOTAL');
     const workers = positiveInteger(process.env.WORKER_COUNT || DEFAULT_WORKER_COUNT, 'WORKER_COUNT');
-    const existing = await assertCleanTarget(db.collection(TARGET_COLLECTION));
+    const existing = await countTargetBaseline(db.collection(TARGET_COLLECTION));
     const matrix = buildWorkerMatrix(existing, target, workers);
     const matrixJson = JSON.stringify(matrix);
     appendGitHubOutput('matrix', matrixJson);
@@ -178,9 +172,8 @@ async function finalize(db: Db, dbName: string): Promise<void> {
     }
 
     const targetCollection = db.collection(TARGET_COLLECTION);
-    await assertCleanTarget(targetCollection);
+    await countTargetBaseline(targetCollection);
     const baseline = await targetCollection.countDocuments({
-        ...validRtpFilter,
         'data.captureCampaignId': { $ne: runId },
     });
     if (baseline !== expectedExisting) {
@@ -191,6 +184,42 @@ async function finalize(db: Db, dbName: string): Promise<void> {
     for (let index = 1; index <= workers; index += 1) {
         const staging = db.collection(stagingCollectionName(dbName, runId, index, 'worker'));
         await assertStaging(staging, runId, index, quotas[index - 1], allowedOverage);
+    }
+
+    // 只有完整覆盖已发现的可选分支，才能把本轮专项样本合并进正式库。
+    const formalOptionRows = await targetCollection.aggregate<{ _id: null; max: number }>([
+        { $match: { 'data.freeChoiceOptionCount': { $gt: 1 } } },
+        { $group: { _id: null, max: { $max: '$data.freeChoiceOptionCount' } } },
+    ], { allowDiskUse: true }).toArray();
+    let optionCount = Number(formalOptionRows[0]?.max || 0);
+    const capturedOptions = new Set<number>();
+    for (let index = 1; index <= workers; index += 1) {
+        const staging = db.collection(stagingCollectionName(dbName, runId, index, 'worker'));
+        const [indexes, counts] = await Promise.all([
+            staging.distinct('data.freeChoiceOptionIndex', expectedStagingFilter(runId, index)),
+            staging.distinct('data.freeChoiceOptionCount', expectedStagingFilter(runId, index)),
+        ]);
+        for (const value of indexes) {
+            const choice = Number(value);
+            if (Number.isInteger(choice) && choice > 0) capturedOptions.add(choice);
+        }
+        for (const value of counts) optionCount = Math.max(optionCount, Number(value) || 0);
+    }
+    if (optionCount > 1) {
+        const missing = Array.from({ length: optionCount }, (_, i) => i + 1)
+            .filter(index => !capturedOptions.has(index));
+        if (missing.length) throw new Error(`branch coverage incomplete: choices ${missing.join(',')} missing; staging retained`);
+    }
+    if (['ag_TripleSupremeXtremeGrandProsperity', 'ag_TripleSupremeXtremeHeartOfTheSea'].includes(dbName)) {
+        const expectedActions = ['PICK_FREE_SPINS', 'PICK_GOLD_COIN', 'PICK'];
+        const capturedActions = new Set<string>();
+        for (let index = 1; index <= workers; index += 1) {
+            const staging = db.collection(stagingCollectionName(dbName, runId, index, 'worker'));
+            const actions = await staging.distinct('data.roundTrigger.NextActionInfo.nextAction', expectedStagingFilter(runId, index));
+            for (const action of actions) capturedActions.add(String(action));
+        }
+        const missing = expectedActions.filter(action => !capturedActions.has(action));
+        if (missing.length) throw new Error(`Triple Supreme free-type coverage incomplete: ${missing.join(',')} missing; staging retained`);
     }
 
     for (let index = 1; index <= workers; index += 1) {
@@ -208,18 +237,18 @@ async function finalize(db: Db, dbName: string): Promise<void> {
         ], { allowDiskUse: true }).toArray();
     }
 
-    const [finalTotal, finalTagged] = await Promise.all([
+    const [finalTotal, campaignTotal] = await Promise.all([
         targetCollection.countDocuments({}),
-        targetCollection.countDocuments(validRtpFilter),
+        targetCollection.countDocuments({ 'data.captureCampaignId': runId }),
     ]);
-    if (finalTotal !== target || finalTagged !== target) {
-        throw new Error(`final count mismatch: total=${finalTotal} tagged=${finalTagged} target=${target}`);
+    if (finalTotal !== target || campaignTotal !== target - expectedExisting) {
+        throw new Error(`final count mismatch: total=${finalTotal} campaign=${campaignTotal} target=${target}`);
     }
 
     for (let index = 1; index <= workers; index += 1) {
         await db.collection(stagingCollectionName(dbName, runId, index, 'worker')).drop();
     }
-    console.log(`[finalize] total=${finalTotal} tagged=${finalTagged} staging-dropped=${workers}`);
+    console.log(`[finalize] total=${finalTotal} campaign=${campaignTotal} staging-dropped=${workers}`);
 }
 
 async function main(): Promise<void> {

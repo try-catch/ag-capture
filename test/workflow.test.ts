@@ -40,6 +40,12 @@ test('workflow requires the canonical game and database pair in every job', () =
     assert.match(workflow, /npm run campaign -- validate-target/);
 });
 
+test('single-game workflow accepts a larger formal target for branch top-ups', () => {
+    const parsed = yaml.load(fs.readFileSync(workflowPath, 'utf8')) as any;
+    assert.equal(parsed.on.workflow_dispatch.inputs.target_total.default, '300000');
+    assert.equal(parsed.env.TARGET_TOTAL, "${{ inputs.target_total || '300000' }}");
+});
+
 test('worker and canary collection names include the selected database', () => {
     const workflow = fs.readFileSync(workflowPath, 'utf8');
 

@@ -1,8 +1,8 @@
 import { RoxorCometDSession } from './ag.client';
 import {
     buildCaptureState,
+    AGChoiceBalancer,
     ensureChoiceTasks,
-    getOptionHits,
     getTaskByKey,
     isCaptureComplete,
     markTaskFailure,
@@ -18,7 +18,7 @@ import {
     AGCompletedRound,
     AGGameConfig,
 } from './ag.types';
-import { captureAGRound, AGDiscardedRoundError, AGInitialSpinResponseError, isInitialSpinRuntimeError, selectFreeChoiceOption } from './ag.round';
+import { captureAGRound, AGDiscardedRoundError, AGInitialSpinResponseError, isInitialSpinRuntimeError } from './ag.round';
 
 export interface AGSchedulerOptions {
     validationSamples?: number;
@@ -45,6 +45,7 @@ interface CaptureAttemptResult {
     session: RoxorCometDSession | null;
     round: AGCompletedRound | null;
     reservedChoice: AGCaptureTask | null;
+    reservedOptionIndex: number;
     error?: Error;
 }
 
@@ -133,6 +134,7 @@ export function getCaptureSampleGroups(round: AGCompletedRound, state: AGCapture
 
 class AGGameRunner {
     private state!: AGCaptureState;
+    private choiceBalancer!: AGChoiceBalancer;
     private playedRounds = 0;
     private readonly liveSessions = new Set<RoxorCometDSession>();
     private leaseTimer: NodeJS.Timeout | null = null;
@@ -232,6 +234,7 @@ class AGGameRunner {
             expectedEvents = requirements.events;
         }
         this.state = buildCaptureState(counts, limits);
+        this.choiceBalancer = new AGChoiceBalancer(counts.balanceChoiceOptions || counts.freeChoiceOptions);
         for (const event of expectedEvents) {
             const current = counts.events?.[event] || 0;
             const target = 1; // 流程验收只需覆盖特殊事件；玩家选项仍各采 validationSamples 条。
@@ -280,6 +283,7 @@ class AGGameRunner {
     private chooseAndReserveOption(pickOptions: Array<{ pickIndex: number | string }>): {
         option: { pickIndex: number | string } | null;
         task: AGCaptureTask | null;
+        optionIndex: number;
     } {
         ensureChoiceTasks(this.state, pickOptions.length, this.options.limits.freeChoicePerOption);
         const optionIndexes = pickOptions
@@ -290,12 +294,15 @@ class AGGameRunner {
             return {
                 task,
                 option: pickOptions.find((option) => Number(option.pickIndex) === task.optionIndex) || null,
+                optionIndex: task.optionIndex,
             };
         }
 
+        const optionIndex = this.choiceBalancer.reserve(optionIndexes) || 0;
         return {
             task: null,
-            option: selectFreeChoiceOption(pickOptions, getOptionHits(this.state, true)),
+            option: pickOptions.find(option => Number(option.pickIndex) === optionIndex) || null,
+            optionIndex,
         };
     }
 
@@ -305,27 +312,31 @@ class AGGameRunner {
     ): Promise<CaptureAttemptResult> {
         let activeSession = session;
         let reservedChoice: AGCaptureTask | null = null;
+        let reservedOptionIndex = 0;
 
         for (let attempt = 0; attempt <= this.options.retryAttempts; attempt += 1) {
             if (this.fatalError) {
-                return { session: activeSession, round: null, reservedChoice: null, error: this.fatalError };
+                return { session: activeSession, round: null, reservedChoice: null, reservedOptionIndex: 0, error: this.fatalError };
             }
             try {
                 activeSession = await this.ensureSession(activeSession);
                 if (this.fatalError) {
-                    return { session: activeSession, round: null, reservedChoice: null, error: this.fatalError };
+                    return { session: activeSession, round: null, reservedChoice: null, reservedOptionIndex: 0, error: this.fatalError };
                 }
                 reservedChoice = null;
+                reservedOptionIndex = 0;
                 const round = await captureAGRound(activeSession, {
                     chooseOption: (pickOptions) => {
                         const picked = this.chooseAndReserveOption(pickOptions);
                         reservedChoice = picked.task;
+                        reservedOptionIndex = picked.optionIndex;
                         return picked.option;
                     },
                 });
                 this.playedRounds += 1;
-                return { session: activeSession, round, reservedChoice };
+                return { session: activeSession, round, reservedChoice, reservedOptionIndex };
             } catch (error) {
+                if (reservedOptionIndex) this.choiceBalancer.complete(reservedOptionIndex, false);
                 if (reservedChoice) {
                     markTaskFailure(this.state, reservedChoice);
                     reservedChoice = null;
@@ -337,10 +348,10 @@ class AGGameRunner {
                 }
                 activeSession = await this.resetSession(activeSession);
                 if (this.fatalError) {
-                    return { session: activeSession, round: null, reservedChoice: null, error: this.fatalError };
+                    return { session: activeSession, round: null, reservedChoice: null, reservedOptionIndex: 0, error: this.fatalError };
                 }
                 if (this.isShuttingDown()) {
-                    return { session: activeSession, round: null, reservedChoice: null, error: new Error('shutdown requested') };
+                    return { session: activeSession, round: null, reservedChoice: null, reservedOptionIndex: 0, error: new Error('shutdown requested') };
                 }
                 if (attempt < this.options.retryAttempts) {
                     console.warn(
@@ -349,16 +360,17 @@ class AGGameRunner {
                     await sleep(this.options.retryDelayMs * Math.pow(2, attempt), this.options.shutdownSignal);
                     continue;
                 }
-                return { session: activeSession, round: null, reservedChoice: null, error: normalized };
+                return { session: activeSession, round: null, reservedChoice: null, reservedOptionIndex: 0, error: normalized };
             }
         }
 
-        return { session: activeSession, round: null, reservedChoice: null, error: new Error('capture failed') };
+        return { session: activeSession, round: null, reservedChoice: null, reservedOptionIndex: 0, error: new Error('capture failed') };
     }
 
-    private async storeRound(round: AGCompletedRound, reservedChoice: AGCaptureTask | null): Promise<boolean> {
+    private async storeRound(round: AGCompletedRound, reservedChoice: AGCaptureTask | null, reservedOptionIndex: number): Promise<boolean> {
         const sampleGroups = getCaptureSampleGroups(round, this.state);
         if (sampleGroups.length === 0) {
+            if (reservedOptionIndex) this.choiceBalancer.complete(reservedOptionIndex, false);
             if (reservedChoice) {
                 markTaskFailure(this.state, reservedChoice);
             }
@@ -367,6 +379,7 @@ class AGGameRunner {
 
         round.data.captureSampleGroups = sampleGroups;
         await this.options.store.insertRound(this.dbName, round, this.game.rtpBuckets);
+        if (reservedOptionIndex) this.choiceBalancer.complete(reservedOptionIndex, round.optionIndex === reservedOptionIndex);
 
         if (sampleGroups.includes('base')) {
             recordTaskSuccessByKey(this.state, 'base');
@@ -408,6 +421,7 @@ class AGGameRunner {
                 session = result.session;
                 if (this.fatalError) {
                     if (result.reservedChoice) markTaskFailure(this.state, result.reservedChoice);
+                    if (result.reservedOptionIndex) this.choiceBalancer.complete(result.reservedOptionIndex, false);
                     return;
                 }
                 if (!result.round) {
@@ -419,7 +433,7 @@ class AGGameRunner {
                     return;
                 }
 
-                const stored = await this.storeRound(result.round, result.reservedChoice);
+                const stored = await this.storeRound(result.round, result.reservedChoice, result.reservedOptionIndex);
                 this.logProgress(workerId, stored);
 
                 if (result.round.data?.requiresSessionReset

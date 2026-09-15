@@ -199,3 +199,32 @@ export function getOptionHits(state: AGCaptureState, includeInflight = false): R
     }
     return hits;
 }
+
+// 选项配额为 0 时也需要轮换；已保存的暂存样本用于断点续拉，多线程预占避免同时选中同一项。
+export class AGChoiceBalancer {
+    private readonly hits: Record<number, number>;
+    private readonly pending: Record<number, number> = {};
+
+    constructor(existingHits: Record<number, number>) {
+        this.hits = { ...existingHits };
+    }
+
+    reserve(optionIndexes: number[]): number | null {
+        const indexes = [...new Set(optionIndexes.filter(index => Number.isInteger(index) && index > 0))];
+        if (!indexes.length) return null;
+        indexes.sort((a, b) => (this.hits[a] || 0) + (this.pending[a] || 0)
+            - (this.hits[b] || 0) - (this.pending[b] || 0) || a - b);
+        const selected = indexes[0];
+        this.pending[selected] = (this.pending[selected] || 0) + 1;
+        return selected;
+    }
+
+    complete(index: number, stored: boolean): void {
+        this.pending[index] = Math.max(0, (this.pending[index] || 0) - 1);
+        if (stored) this.hits[index] = (this.hits[index] || 0) + 1;
+    }
+
+    snapshot(): Record<number, number> {
+        return { ...this.hits };
+    }
+}

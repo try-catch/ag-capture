@@ -1,11 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    AGChoiceBalancer,
     applyGameShard,
     buildCaptureState,
     selectNextTask,
     markTaskSuccess,
 } from '../src/ag.plan';
+
+test('zero-quota choices rotate across concurrent picks and resume from stored counts', () => {
+    const balance = new AGChoiceBalancer({ 1: 2, 2: 0, 3: 0, 4: 0 });
+    const selected = Array.from({ length: 8 }, () => balance.reserve([1, 2, 3, 4]));
+    assert.deepEqual(selected, [2, 3, 4, 2, 3, 4, 1, 2]);
+    for (const index of selected) balance.complete(index!, true);
+    const resumed = new AGChoiceBalancer(balance.snapshot());
+    assert.equal(resumed.reserve([1, 2, 3, 4]), 3);
+    resumed.complete(3, false);
+    assert.equal(resumed.reserve([1, 2, 3, 4]), 3);
+});
 import { AGGameConfig, AGMongoCounts } from '../src/ag.types';
 
 function game(gameId: string, dbName = gameId): AGGameConfig {

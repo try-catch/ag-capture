@@ -418,7 +418,23 @@ export class AGMongoStore {
             optionCount = Math.max(optionCount, optionIndex, Number(row.optionCount || 0));
         }
 
-        return { base, total, optionCount, freeChoiceOptions, feature,
+        const balanceChoiceOptions = { ...freeChoiceOptions };
+        if (collection.collectionName !== 'simulate') {
+            const client = await this.getClient();
+            const formalRows = await client.db(normalizeDbName(dbName)).collection('simulate')
+                .aggregate<{ _id: number; count: number }>([
+                    { $match: { 'data.freeChoiceOptionIndex': { $gt: 0 } } },
+                    { $group: { _id: '$data.freeChoiceOptionIndex', count: { $sum: 1 } } },
+                ], { allowDiskUse: true }).toArray();
+            for (const row of formalRows) {
+                const index = Number(row._id);
+                if (Number.isInteger(index) && index > 0) {
+                    balanceChoiceOptions[index] = (balanceChoiceOptions[index] || 0) + Number(row.count || 0);
+                }
+            }
+        }
+
+        return { base, total, optionCount, freeChoiceOptions, balanceChoiceOptions, feature,
             events:Object.fromEntries(eventRows.map(row=>[row._id,row.count])) };
     }
 

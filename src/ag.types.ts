@@ -49,6 +49,7 @@ export interface AGMongoCounts {
     total: number;
     optionCount: number;
     freeChoiceOptions: Record<number, number>;
+    balanceChoiceOptions?: Record<number, number>;
 }
 
 export interface AGCaptureLimits {
