@@ -9,6 +9,15 @@ import { loadGameTargets, resolveGameTarget } from './game-target';
 export const TARGET_COLLECTION = 'simulate';
 export const DEFAULT_TARGET_TOTAL = 300_000;
 export const DEFAULT_WORKER_COUNT = 20;
+export const MIN_BRANCH_SAMPLES = 100;
+
+export function missingBranchSamples(counts: Record<number, number>, optionCount: number): number[] {
+    if (!Number.isInteger(optionCount) || optionCount < 0 || optionCount > 100) {
+        throw new Error('invalid option count for branch audit');
+    }
+    return Array.from({ length: optionCount }, (_, index) => index + 1)
+        .filter(index => (counts[index] || 0) < MIN_BRANCH_SAMPLES);
+}
 
 function positiveInteger(value: unknown, label: string): number {
     const parsed = Number(value);
@@ -192,23 +201,28 @@ async function finalize(db: Db, dbName: string): Promise<void> {
         { $group: { _id: null, max: { $max: '$data.freeChoiceOptionCount' } } },
     ], { allowDiskUse: true }).toArray();
     let optionCount = Number(formalOptionRows[0]?.max || 0);
-    const capturedOptions = new Set<number>();
+    const branchCounts: Record<number, number> = {};
+    const formalChoices = await targetCollection.aggregate<{ _id: number; count: number }>([
+        { $match: { 'data.captureVersion': AG_CAPTURE_VERSION, 'data.freeChoiceOptionIndex': { $gt: 0 } } },
+        { $group: { _id: '$data.freeChoiceOptionIndex', count: { $sum: 1 } } },
+    ], { allowDiskUse: true }).toArray();
+    for (const row of formalChoices) branchCounts[Number(row._id)] = Number(row.count || 0);
     for (let index = 1; index <= workers; index += 1) {
         const staging = db.collection(stagingCollectionName(dbName, runId, index, 'worker'));
-        const [indexes, counts] = await Promise.all([
-            staging.distinct('data.freeChoiceOptionIndex', expectedStagingFilter(runId, index)),
-            staging.distinct('data.freeChoiceOptionCount', expectedStagingFilter(runId, index)),
-        ]);
-        for (const value of indexes) {
-            const choice = Number(value);
-            if (Number.isInteger(choice) && choice > 0) capturedOptions.add(choice);
+        const rows = await staging.aggregate<{ _id: number; count: number; max: number }>([
+            { $match: expectedStagingFilter(runId, index) },
+            { $match: { 'data.freeChoiceOptionIndex': { $gt: 0 } } },
+            { $group: { _id: '$data.freeChoiceOptionIndex', count: { $sum: 1 }, max: { $max: '$data.freeChoiceOptionCount' } } },
+        ], { allowDiskUse: true }).toArray();
+        for (const row of rows) {
+            const choice = Number(row._id);
+            if (Number.isInteger(choice) && choice > 0) branchCounts[choice] = (branchCounts[choice] || 0) + Number(row.count || 0);
+            optionCount = Math.max(optionCount, Number(row.max) || 0);
         }
-        for (const value of counts) optionCount = Math.max(optionCount, Number(value) || 0);
     }
     if (optionCount > 1) {
-        const missing = Array.from({ length: optionCount }, (_, i) => i + 1)
-            .filter(index => !capturedOptions.has(index));
-        if (missing.length) throw new Error(`branch coverage incomplete: choices ${missing.join(',')} missing; staging retained`);
+        const missing = missingBranchSamples(branchCounts, optionCount);
+        if (missing.length) throw new Error(`branch coverage incomplete: choices ${missing.join(',')} below ${MIN_BRANCH_SAMPLES} samples; staging retained`);
     }
     if (['ag_TripleSupremeXtremeGrandProsperity', 'ag_TripleSupremeXtremeHeartOfTheSea'].includes(dbName)) {
         const expectedActions = ['PICK_FREE_SPINS', 'PICK_GOLD_COIN', 'PICK'];

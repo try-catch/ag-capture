@@ -3,11 +3,19 @@ import assert from 'node:assert/strict';
 import {
     buildWorkerMatrix,
     DEFAULT_WORKER_COUNT,
+    MIN_BRANCH_SAMPLES,
+    missingBranchSamples,
     normalizeRunId,
     splitQuota,
     stagingCollectionName,
     validateStagingCounts,
 } from '../scripts/campaign';
+
+test('branch gate counts formal and top-up samples together', () => {
+    assert.equal(MIN_BRANCH_SAMPLES, 100);
+    assert.deepEqual(missingBranchSamples({ 1: 2235, 2: 99, 3: 100, 4: 125 }, 4), [2]);
+    assert.deepEqual(missingBranchSamples({ 1: 2235, 2: 100, 3: 100, 4: 125 }, 4), []);
+});
 
 test('quota split is exact for 299990 rows across 20 workers', () => {
     assert.equal(DEFAULT_WORKER_COUNT, 20);
