@@ -26,7 +26,7 @@ test('workflow is manual-only and runs twenty isolated workers', () => {
     assert.equal(parsed.jobs.canary.strategy?.['max-parallel'], 2);
     assert.equal(parsed.jobs.canary.env?.CONCURRENT_PER_GAME, '1');
     assert.equal(parsed.jobs.capture.env?.CONCURRENT_PER_GAME, '8');
-    assert.match(workflow, /github\.repository == 'dune3887\/ag-capture-public-runner'/);
+    assert.match(workflow, /github\.repository == 'try-catch\/ag-capture'/);
 });
 
 test('workflow requires the canonical game and database pair in every job', () => {
@@ -111,5 +111,5 @@ test('diagnostic dispatch disables automatic merge and defaults off', () => {
     assert.equal(parsed.on.workflow_dispatch.inputs.diagnostic_only.type, 'boolean');
     assert.equal(parsed.on.workflow_dispatch.inputs.diagnostic_only.default, false);
     assert.equal(parsed.env.DIAGNOSTIC_ONLY, '${{ inputs.diagnostic_only }}');
-    assert.equal(parsed.jobs.finalize.if, "github.repository == 'dune3887/ag-capture-public-runner' && !inputs.diagnostic_only");
+    assert.equal(parsed.jobs.finalize.if, "github.repository == 'try-catch/ag-capture' && !inputs.diagnostic_only");
 });

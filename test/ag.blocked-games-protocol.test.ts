@@ -111,7 +111,17 @@ test('Lucky88：DICE_SPIN 映射为小写 dicespin 且载荷为空（官方前�
 
     assert.deepEqual(seen.map(e => e.event), ['wager', 'Spin', 'dicespin']);
     assert.deepEqual(seen[2].params, {}, 'dicespin 必须为空参数（官方 requestResponse("dicespin","{}")）');
-    
+});
+
+test('Lucky88：PICK 使用官方五选一协议，第 5 项进入 Dice 分支', () => {
+    const protocol = lucky88().getPickProtocol('PICK', {});
+
+    assert.equal(protocol?.event, 'pick');
+    assert.equal(protocol?.kind, 'choice');
+    assert.deepEqual(protocol?.options, [1, 2, 3, 4, 5].map((pickIndex) => ({
+        pickIndex,
+        requestPickIndex: pickIndex,
+    })));
 });
 
 test('Secrets of the Phoenix Hold & Gold：HOLD_AND_GOLD_SPIN 映射为官方驼峰 HoldAndGoldSpin（AG-REJECT 实证小写被拒）', async () => {

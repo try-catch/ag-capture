@@ -792,6 +792,19 @@ export class RoxorCometDSession {
     }
 
     getPickProtocol(action: string, response: Record<string, any>, revealedIndexes: readonly number[] = []): AGPickProtocol | undefined {
+        // Lucky 88 2.0.1 官方前端的选择页固定为五选一，点击序号 1..5，并发送
+        // pick{coinSize,numberOfCoins,pickIndex}；第 5 项会进入 DICE_SPIN。
+        if (this.game.backendArtifactId === 'rgp-game-lucky88'
+            && String(action).trim().toUpperCase() === 'PICK') {
+            return {
+                event: 'pick',
+                kind: 'choice',
+                options: Array.from({ length: 5 }, (_, index) => ({
+                    pickIndex: index + 1,
+                    requestPickIndex: index + 1,
+                })),
+            };
+        }
         // 已核对的 Wonders of The Deep 3.0.20 官方前端（js-slot bundle）：Pick 奖励的线报事件是
         // boardPickEvent，参数为 {row: String(reelIndex), column: String(lineIndex)}，
         // row=reelIndex 0..4（5 卷轴）、column=lineIndex 0..2（每卷 3 行）。

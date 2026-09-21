@@ -51,7 +51,7 @@ env:
 
 jobs:
   canary:
-    if: github.repository == 'dune3887/ag-capture-public-runner'
+    if: github.repository == 'try-catch/ag-capture'
     name: 验证节点 ${{ matrix.worker }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -99,7 +99,7 @@ jobs:
         run: npm run campaign -- verify-canary
 
   prepare:
-    if: github.repository == 'dune3887/ag-capture-public-runner'
+    if: github.repository == 'try-catch/ag-capture'
     name: 计算精确缺口
     needs: canary
     runs-on: ubuntu-latest
@@ -121,7 +121,7 @@ jobs:
         run: npm run campaign -- prepare
 
   capture:
-    if: github.repository == 'dune3887/ag-capture-public-runner'
+    if: github.repository == 'try-catch/ag-capture'
     name: 拉取节点 ${{ matrix.index }} / ${{ matrix.quota }} 条
     needs: prepare
     runs-on: ubuntu-latest
@@ -165,7 +165,7 @@ jobs:
           exit 1
 
   finalize:
-    if: github.repository == 'dune3887/ag-capture-public-runner' && !inputs.diagnostic_only
+    if: github.repository == 'try-catch/ag-capture' && !inputs.diagnostic_only
     name: 合并并验收目标总量
     needs: [prepare, capture]
     runs-on: ubuntu-latest
