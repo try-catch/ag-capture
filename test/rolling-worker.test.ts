@@ -17,13 +17,15 @@ test('payload rejects wrong bindings, credentials, duplicates and unsafe baselin
         (p) => { p.games[0].dbName = 'ag_B'; },
         (p) => { p.games[0].mongoUri = p.games[0].mongoUri.replace('authSource=ag_A', 'authSource=admin'); },
         (p) => { p.games[0].mongoUri = p.games[0].mongoUri.replace('agcap_fixture', 'admin'); },
-        (p) => { p.games[0].baseline = 270000; },
+        (p) => { p.games[0].baseline = 300000; },
         (p) => { p.games.push(p.games[0]); },
         (p) => { p.queueId = '../unsafe'; },
     ]) {
         const copy = JSON.parse(JSON.stringify(payload)); mutate(copy);
         assert.throws(() => validateRollingPayload(copy, manifest));
     }
+    const nearTarget = JSON.parse(JSON.stringify(payload)); nearTarget.games[0].baseline = 299999;
+    assert.equal(validateRollingPayload(nearTarget, manifest).games[0].baseline, 299999);
     assert.throws(() => taskId('worker', 21));
     assert.throws(() => taskId('canary', 3));
 });

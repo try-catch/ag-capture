@@ -31,7 +31,7 @@ export function validateRollingPayload(value: unknown, manifest: ManifestGame[])
     for (const game of payload.games) {
         if (!game || typeof game.gameId !== 'string' || typeof game.dbName !== 'string'
             || typeof game.campaignId !== 'string' || !safeId.test(game.campaignId)
-            || !Number.isInteger(game.baseline) || game.baseline < 0 || game.baseline >= 270_000
+            || !Number.isInteger(game.baseline) || game.baseline < 0 || game.baseline >= TARGET
             || typeof game.mongoUri !== 'string') throw new Error('invalid rolling game');
         resolveGameTarget(manifest, game.gameId, game.dbName);
         if (ids.has(game.gameId) || databases.has(game.dbName) || campaigns.has(game.campaignId)) {
