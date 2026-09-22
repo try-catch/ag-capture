@@ -13,6 +13,18 @@ test('Christmas Cottage 小写协议保留官方 PickRequest 参数', () => {
     assert.deepEqual(other.getPickParams('2'), {pickIndex:'2'});
 });
 
+test('Christmas Cottage 使用官方十五选一协议', () => {
+    const session = new RoxorCometDSession({gameId:'play-christmas-cottage',name:'Christmas Cottage',backendArtifactId:'rgp-game-christmas-cottage'});
+    const protocol = session.getPickProtocol('PICK', {});
+
+    assert.equal(protocol?.event, 'PickRequest');
+    assert.equal(protocol?.kind, 'choice');
+    assert.deepEqual(protocol?.options, Array.from({length:15}, (_, index) => ({
+        pickIndex:index + 1,
+        requestPickIndex:index,
+    })));
+});
+
 test('Christmas PickRequest 不被小写协商改写', async () => {
     const session = new RoxorCometDSession({gameId:'play-christmas-cottage',name:'Christmas Cottage',backendArtifactId:'rgp-game-christmas-cottage'});
     (session as any).protocol = 'lowercase-standard';

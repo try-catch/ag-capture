@@ -792,6 +792,19 @@ export class RoxorCometDSession {
     }
 
     getPickProtocol(action: string, response: Record<string, any>, revealedIndexes: readonly number[] = []): AGPickProtocol | undefined {
+        // Christmas Cottage 1.0.6 官方前端展示 15 个 PickOption，点击后发送
+        // PickRequest{roundIndex:0,pickIndex:0..14,autoPick:false}。
+        if (this.game.backendArtifactId === 'rgp-game-christmas-cottage'
+            && String(action).trim().toUpperCase() === 'PICK') {
+            return {
+                event: 'PickRequest',
+                kind: 'choice',
+                options: Array.from({ length: 15 }, (_, index) => ({
+                    pickIndex: index + 1,
+                    requestPickIndex: index,
+                })),
+            };
+        }
         // Lucky 88 2.0.1 官方前端的选择页固定为五选一，点击序号 1..5，并发送
         // pick{coinSize,numberOfCoins,pickIndex}；第 5 项会进入 DICE_SPIN。
         if (this.game.backendArtifactId === 'rgp-game-lucky88'
