@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   rolling:
-    if: github.repository == 'dune3887/ag-capture-public-runner'
+    if: github.repository == 'try-catch/ag-capture'
     name: 滚动通道 ${{ matrix.lane }}
     runs-on: ubuntu-latest
     timeout-minutes: 350

@@ -29,6 +29,12 @@ test('workflow is manual-only and runs twenty isolated workers', () => {
     assert.match(workflow, /github\.repository == 'try-catch\/ag-capture'/);
 });
 
+test('rolling workflow is bound to the current public repository', () => {
+    const workflow = fs.readFileSync('.github/workflows/capture-ag-rolling.yml', 'utf8');
+    assert.match(workflow, /github\.repository == 'try-catch\/ag-capture'/);
+    assert.doesNotMatch(workflow, /dune3887\/ag-capture-public-runner/);
+});
+
 test('workflow requires the canonical game and database pair in every job', () => {
     const workflow = fs.readFileSync(workflowPath, 'utf8');
 
