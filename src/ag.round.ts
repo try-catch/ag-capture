@@ -834,7 +834,7 @@ export async function captureAGRound(
             // 协议降级不能偷偷把选项 2 改成选项 1，然后仍按选项 2 计数。
             throw new Error('AG integrity: selected option changed during protocol negotiation');
         }
-        if (pickProtocol?.kind === 'reveal') {
+        if (pickProtocol?.revealedIndexes) {
             verifiedRevealedIndexes = [...(pickProtocol.revealedIndexes || []), Number(chosenRequestIndex)];
         }
         negotiatedEvents.set(actionKey, event);

@@ -799,10 +799,11 @@ export class RoxorCometDSession {
             return {
                 event: 'PickRequest',
                 kind: 'choice',
+                revealedIndexes: [...revealedIndexes],
                 options: Array.from({ length: 15 }, (_, index) => ({
                     pickIndex: index + 1,
                     requestPickIndex: index,
-                })),
+                })).filter(option => !revealedIndexes.includes(option.requestPickIndex)),
             };
         }
         // Lucky 88 2.0.1 官方前端的选择页固定为五选一，点击序号 1..5，并发送
